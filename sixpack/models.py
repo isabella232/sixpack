@@ -6,8 +6,8 @@ import random
 import re
 import redis
 
-from config import CONFIG as cfg
-from db import _key, msetbit, sequential_id, first_key_with_bit_set
+from .config import CONFIG as cfg
+from .db import _key, msetbit, sequential_id, first_key_with_bit_set
 
 # This is pretty restrictive, but we can always relax it later.
 VALID_EXPERIMENT_ALTERNATIVE_RE = re.compile(r"^[a-z0-9][a-z0-9\-_]*$", re.I)
@@ -27,7 +27,13 @@ class Experiment(object):
         winner=False,
         traffic_fraction=False,
         redis=None):
-
+        _temp = []
+        for alternative in alternatives:
+            if isinstance(alternative, bytes):
+                _temp.append(alternative.decode("utf-8"))
+            else:
+                _temp.append(alternative)
+        alternatives = _temp
         if len(alternatives) < 2:
             raise ValueError('experiments require at least two alternatives')
 
@@ -45,18 +51,23 @@ class Experiment(object):
         return '<Experiment: {0})>'.format(self.name)
 
     def objectify_by_period(self, period, slim=False):
+        if isinstance(self.created_at, bytes):
+            created_at = self.created_at.decode("UTF-8")
+        else:
+            created_at = self.created_at
+
         objectified = {
             'name': self.name,
             'period': period,
             'alternatives': [],
-            'created_at': self.created_at,
+            'created_at': created_at,
             'traffic_fraction': self.traffic_fraction,
             'excluded_clients': self.excluded_clients(),
             'total_participants': self.total_participants(),
             'total_conversions': self.total_conversions(),
             'description': self.description,
             'has_winner': self.winner is not None,
-            'winner': self.winner.name if self.winner is not None else '',
+            'winner': self.winner.name.decode("UTF-8") if self.winner is not None else '',
             'is_archived': self.is_archived(),
             'is_paused': self.is_paused(),
             'kpis': list(self.kpis),
@@ -66,7 +77,6 @@ class Experiment(object):
         for alternative in self.alternatives:
             objectified_alt = alternative.objectify_by_period(period, slim)
             objectified['alternatives'].append(objectified_alt)
-
         if slim:
             for key in ['period', 'kpi', 'kpis', 'has_winner']:
                 del(objectified[key])
@@ -77,7 +87,6 @@ class Experiment(object):
         for alternative_name in alternatives:
             if not Alternative.is_valid(alternative_name):
                 raise ValueError('invalid alternative name')
-
         return [Alternative(n, self, redis=self.redis) for n in alternatives]
 
     def save(self):
@@ -109,7 +118,8 @@ class Experiment(object):
     def created_at(self):
         # Note: the split here is to correctly format legacy dates
         try:
-            return self.redis.hget(self.key(), 'created_at').split('.')[0]
+            encoded_key = self.key()
+            return self.redis.hget(encoded_key, 'created_at')
         except (AttributeError) as e:
             return None
 
@@ -235,6 +245,7 @@ class Experiment(object):
         return self.redis.hexists(self.key(), 'paused')
 
     def convert(self, client, dt=None, kpi=None):
+
         if self.is_archived():
             raise ValueError('this experiment is archived and can no longer be updated')
 
@@ -243,7 +254,6 @@ class Experiment(object):
 
         if self.is_client_excluded(client):
             raise ValueError('this client was not participating')
-
         alternative = self.existing_alternative(client)
         if not alternative:
             raise ValueError('this client was not participating')
@@ -252,7 +262,6 @@ class Experiment(object):
             if not Experiment.validate_kpi(kpi):
                 raise ValueError('invalid kpi name')
             self.add_kpi(kpi)
-
         if not self.existing_conversion(client):
             alternative.record_conversion(client, dt=dt)
 
@@ -354,12 +363,15 @@ class Experiment(object):
 
     def existing_alternative(self, client):
         if self.is_client_excluded(client):
+            print('client was exlucded')
             return None
 
         alts = self.get_alternative_names()
         keys = [_key("p:{0}:{1}:all".format(self.name, alt)) for alt in alts]
         altkey = first_key_with_bit_set(keys=keys, args=[self.sequential_id(client)])
+
         if altkey:
+            altkey = altkey.decode("UTF-8")
             idx = keys.index(altkey)
             return Alternative(alts[idx], self, redis=self.redis)
 
@@ -385,6 +397,8 @@ class Experiment(object):
         # because of the largest integer values that can be represented safely
         # with Sixpack client libraries
         # More Info: https://github.com/seatgeek/sixpack/issues/132#issuecomment-54318218
+        # hashlib.sha256(str(random.getrandbits(256)).encode('utf-8')).hexdigest()
+        salty = salty.encode('utf-8')
         hashed = sha1(salty).hexdigest()[:7]
         return int(hashed, 16)
 
@@ -416,7 +430,6 @@ class Experiment(object):
 
         if not redis.sismember(_key("e"), experiment_name):
             raise ValueError('experiment does not exist')
-
         return cls(experiment_name,
                    Experiment.load_alternatives(experiment_name, redis),
                    redis=redis)
@@ -444,7 +457,7 @@ class Experiment(object):
             experiment.set_traffic_fraction(traffic_fraction)
             experiment.save()
 
-        # Only check traffic fraction if the experiment is being updated 
+        # Only check traffic fraction if the experiment is being updated
         # and the traffic fraction actually changes.
         if is_update and experiment.traffic_fraction != traffic_fraction:
             experiment.set_traffic_fraction(traffic_fraction)
@@ -488,16 +501,17 @@ class Experiment(object):
     @staticmethod
     def load_alternatives(experiment_name, redis=None):
         key = _key("e:{0}:alternatives".format(experiment_name))
+        key = key.replace("b'","").replace("'","")
         return redis.lrange(key, 0, -1)
 
     @staticmethod
     def is_valid(experiment_name):
-        return (isinstance(experiment_name, basestring) and
-                VALID_EXPERIMENT_ALTERNATIVE_RE.match(experiment_name) is not None)
+        return (isinstance(experiment_name, str) and
+                VALID_EXPERIMENT_ALTERNATIVE_RE.match(str(experiment_name)) is not None)
 
     @staticmethod
     def validate_kpi(kpi):
-        return (isinstance(kpi, basestring) and
+        return (isinstance(kpi, str) and
                 VALID_KPI_RE.match(kpi) is not None)
 
 
@@ -515,7 +529,6 @@ class Alternative(object):
 
         if slim:
             return self.name
-
         PERIOD_TO_METHOD_MAP = {
             'day': {
                 'participants': self.participants_by_day,
@@ -537,8 +550,11 @@ class Alternative(object):
 
         conversions = conversion_fn()
         participants = participants_fn()
+        conversion_keys = list(conversions.keys())
+        particpant_keys = list(participants.keys())
+        dates_set = set(conversion_keys + particpant_keys)
 
-        dates = sorted(list(set(conversions.keys() + participants.keys())))
+        dates = sorted(list(dates_set))
         for date in dates:
             _data = {
                 'conversions': conversions.get(date, 0),
@@ -614,6 +630,11 @@ class Alternative(object):
 
         search_key = _key("{0}:{1}:{2}".format(stat_type, exp_key, stat_range))
         keys = self.redis.smembers(search_key)
+        if len(keys) > 0:
+            _temp_keys = list(keys)[0]
+            if isinstance(_temp_keys, bytes):
+                keys = set([x.decode('utf-8') for x in keys])
+
 
         for k in keys:
             name = self.name if stat_type == 'p' else "{0}:users".format(self.name)
@@ -634,7 +655,6 @@ class Alternative(object):
             date = dt
 
         experiment_key = self.experiment.name
-
         pipe = self.redis.pipeline()
 
         pipe.sadd(_key("p:{0}:years".format(experiment_key)), date.strftime('%Y'))
@@ -807,5 +827,4 @@ class Alternative(object):
 
     @staticmethod
     def is_valid(alternative_name):
-        return (isinstance(alternative_name, basestring) and
-                VALID_EXPERIMENT_ALTERNATIVE_RE.match(alternative_name) is not None)
+        return (isinstance(alternative_name, str)) and VALID_EXPERIMENT_ALTERNATIVE_RE.match(alternative_name) is not None

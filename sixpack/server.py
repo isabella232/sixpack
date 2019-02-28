@@ -2,8 +2,8 @@ import os
 import re
 from socket import inet_aton
 import sys
-from urllib import unquote
-
+# from urllib import unquote
+from urllib.parse import unquote
 import dateutil.parser
 from redis import ConnectionError
 from werkzeug.wrappers import Request, Response
@@ -12,20 +12,19 @@ from werkzeug.exceptions import HTTPException, NotFound
 from werkzeug.datastructures import Headers
 
 from . import __version__
-from api import participate, convert
+from .api import participate, convert
 
-from config import CONFIG as cfg
-from metrics import init_statsd
-from utils import to_bool
+from .config import CONFIG as cfg
+from .metrics import init_statsd
+from .utils import to_bool
 
 try:
-    import db
+    from .db import *
 except ConnectionError:
-    print "Redis is currently unavailable or misconfigured"
+    print("Redis is currently unavailable or misconfigured")
     sys.exit()
-
-from models import Experiment, Client
-from utils import service_unavailable_on_connection_error, json_error, json_success
+from .models import Experiment, Client
+from .utils import service_unavailable_on_connection_error, json_error, json_success
 
 
 class CORSMiddleware(object):
@@ -164,7 +163,6 @@ class Sixpack(object):
 
         if client_id is None or experiment_name is None:
             return json_error({'message': 'missing arguments'}, request, 400)
-
         dt = None
         if request.args.get("datetime"):
             dt = dateutil.parser.parse(request.args.get("datetime"))
@@ -174,7 +172,6 @@ class Sixpack(object):
                           datetime=dt, redis=self.redis)
         except ValueError as e:
             return json_error({'message': str(e)}, request, 400)
-
         resp = {
             'alternative': {
                 'name': alt.name
@@ -199,7 +196,6 @@ class Sixpack(object):
         record_force = to_bool(request.args.get('record_force', 'false'))
         client_id = request.args.get('client_id')
         traffic_fraction = request.args.get('traffic_fraction')
-
         if traffic_fraction is not None:
             traffic_fraction = float(traffic_fraction)
         prefetch = to_bool(request.args.get('prefetch', 'false'))
@@ -273,7 +269,7 @@ def is_ignored_ip(ip_address):
 
 # Method to run with built-in server
 def create_app():
-    app = Sixpack(db.REDIS)
+    app = Sixpack(REDIS)
     return CORSMiddleware(app)
 
 

@@ -1,7 +1,7 @@
 import redis
 from redis.connection import PythonParser
 
-from config import CONFIG as cfg
+from .config import CONFIG as cfg
 
 # Because of a bug (https://github.com/andymccurdy/redis-py/issues/318) with
 # script reloading in `redis-py, we need to force the `PythonParser` to prevent
@@ -25,7 +25,9 @@ else:
                         max_connections=cfg.get('redis_max_connections'),
                         parser_class=PythonParser)
 
-REDIS = redis.StrictRedis(connection_pool=pool)
+REDIS = redis.StrictRedis(connection_pool=pool, decode_responses=True)
+# redis.StrictRedis(host="localhost", port=6379, charset="utf-8", decode_responses=True)
+
 DEFAULT_PREFIX = cfg.get('redis_prefix')
 
 

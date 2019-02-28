@@ -1,4 +1,6 @@
-import cStringIO as StringIO
+# import cStringIO as StringIO
+from io import StringIO
+
 import csv
 
 
@@ -8,7 +10,7 @@ class ExportExperiment(object):
         self.experiment = experiment
 
     def __call__(self):
-        csvfile = StringIO.StringIO()
+        csvfile = StringIO()
         writer = csv.writer(csvfile)
         writer.writerow(['Alternative Details'])
         writer.writerow(['date', 'alternative', 'participants', 'conversions'])

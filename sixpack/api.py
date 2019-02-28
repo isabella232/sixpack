@@ -1,5 +1,5 @@
-from models import Experiment, Alternative, Client
-from config import CONFIG as cfg
+from .models import Experiment, Alternative, Client
+from .config import CONFIG as cfg
 
 
 def participate(experiment, alternatives, client_id,
@@ -9,13 +9,10 @@ def participate(experiment, alternatives, client_id,
     prefetch=False,
     datetime=None,
     redis=None):
-
     exp = Experiment.find_or_create(experiment, alternatives, traffic_fraction=traffic_fraction, redis=redis)
-
     alt = None
     if force and force in alternatives:
         alt = Alternative(force, exp, redis=redis)
-
         if record_force:
             client = Client(client_id, redis=redis)
             alt.record_participation(client, datetime)
@@ -31,17 +28,27 @@ def participate(experiment, alternatives, client_id,
     return alt
 
 
+def bulk_participate(experiment, alternatives, data, redis=None):
+    exp = Experiment.find_or_create(experiment, alternatives, redis=redis)
+    for entry in data:
+        variant_name = None
+        datetime = None
+        alt = Alternative(variant_name, exp, redis=redis)
+        client_id = entry['client_id']
+        client = Client(client_id, redis=redis)
+        alt.record_participation(client, datetime)
+
+
+
+
 def convert(experiment, client_id,
     kpi=None,
     datetime=None,
     redis=None):
-
     exp = Experiment.find(experiment, redis=redis)
-
     if cfg.get('enabled', True):
         client = Client(client_id, redis=redis)
         alt = exp.convert(client, dt=datetime, kpi=kpi)
     else:
         alt = exp.control
-
     return alt
